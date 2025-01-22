@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VR Salt Particles</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #enter-vr {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            background: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <button id="enter-vr">Enter VR</button>
+    <script type="module">
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
+
+        class VRButton {
+            static createButton(renderer) {
+                const button = document.getElementById('enter-vr');
+                
+                function showEnterVR() {
+                    let currentSession = null;
+                    
+                    async function onSessionStarted(session) {
+                        session.addEventListener('end', onSessionEnded);
+                        await renderer.xr.setSession(session);
+                        button.textContent = 'EXIT VR';
+                        currentSession = session;
+                    }
+                    
+                    function onSessionEnded() {
+                        currentSession.removeEventListener('end', onSessionEnded);
+                        button.textContent = 'ENTER VR';
+                        currentSession = null;
+                    }
+                    
+                    button.onclick = async () => {
+                        if (currentSession === null) {
+                            const sessionInit = {
+                                optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+                            };
+                            try {
+                                const session = await navigator.xr.requestSession('immersive-vr', sessionInit);
+                                onSessionStarted(session);
+                            } catch (error) {
+                                console.error('VR not supported:', error);
+                            }
+                        } else {
+                            currentSession.end();
+                        }
+                    };
+                }
+                
+                if ('xr' in navigator) {
+                    navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                        supported ? showEnterVR() : console.error('VR not supported');
+                    });
+                }
+                
+                return button;
+            }
+        }
+
+        // Particle system
+        class Particle {
+            constructor(x, y, z, targetX, targetY, targetZ) {
+                this.position = new THREE.Vector3(x, y, z);
+                this.target = new THREE.Vector3(targetX, targetY, targetZ);
+                this.velocity = new THREE.Vector3();
+                this.force = new THREE.Vector3();
+                this.size = 0.01;
+                this.baseSize = 0.01;
+                this.friction = 0.95;
+                this.ease = 0.05;
+            }
+
+            update(controller) {
+                // Return to target position
+                const direction = new THREE.Vector3().subVectors(this.target, this.position);
+                this.position.add(direction.multiplyScalar(this.ease));
+
+                // React to controller
+                if (controller) {
+                    const controllerPosition = new THREE.Vector3();
+                    controller.getWorldPosition(controllerPosition);
+                    
+                    const distanceToController = this.position.distanceTo(controllerPosition);
+                    if (distanceToController < 0.2) {
+                        const repelForce = new THREE.Vector3().subVectors(this.position, controllerPosition);
+                        repelForce.normalize().multiplyScalar((0.2 - distanceToController) * 0.1);
+                        this.force.add(repelForce);
+                    }
+                }
+
+                // Apply physics
+                this.velocity.add(this.force);
+                this.position.add(this.velocity);
+                this.velocity.multiplyScalar(this.friction);
+                this.force.set(0, 0, 0);
+            }
+        }
+
+        // Main Application
+        class VRSaltApp {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.xr.enabled = true;
+                document.body.appendChild(this.renderer.domElement);
+                
+                VRButton.createButton(this.renderer);
+                
+                // Create particles
+                this.particles = [];
+                this.createParticles();
+                
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+                directionalLight.position.set(0, 1, 0);
+                this.scene.add(directionalLight);
+                
+                // Position camera and add controllers
+                this.camera.position.z = 2;
+                
+                this.controller1 = this.renderer.xr.getController(0);
+                this.scene.add(this.controller1);
+                
+                this.controller2 = this.renderer.xr.getController(1);
+                this.scene.add(this.controller2);
+                
+                // Start animation
+                this.renderer.setAnimationLoop(this.render.bind(this));
+            }
+            
+            createParticles() {
+                // Create text texture
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = 512;
+                canvas.height = 256;
+                
+                ctx.fillStyle = 'white';
+                ctx.font = '120px "Bebas Neue"';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('SALT', canvas.width / 2, canvas.height / 2);
+                
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const pixels = imageData.data;
+                
+                // Create geometry
+                const geometry = new THREE.BufferGeometry();
+                const positions = [];
+                const colors = [];
+                
+                // Sample pixels to create particles
+                for (let y = 0; y < canvas.height; y += 4) {
+                    for (let x = 0; x < canvas.width; x += 4) {
+                        const i = (y * canvas.width + x) * 4;
+                        if (pixels[i + 3] > 128) {
+                            const px = (x - canvas.width / 2) * 0.002;
+                            const py = (canvas.height / 2 - y) * 0.002;
+                            const pz = 0;
+                            
+                            this.particles.push(new Particle(
+                                px + (Math.random() - 0.5) * 0.2,
+                                py + (Math.random() - 0.5) * 0.2,
+                                pz + (Math.random() - 0.5) * 0.2,
+                                px, py, pz
+                            ));
+                            
+                            positions.push(px, py, pz);
+                            colors.push(1, 1, 1);
+                        }
+                    }
+                }
+                
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                
+                const material = new THREE.PointsMaterial({
+                    size: 0.01,
+                    vertexColors: true,
+                    sizeAttenuation: true
+                });
+                
+                this.pointCloud = new THREE.Points(geometry, material);
+                this.scene.add(this.pointCloud);
+            }
+            
+            render() {
+                // Update particles
+                this.particles.forEach((particle, i) => {
+                    particle.update(this.controller1);
+                    particle.update(this.controller2);
+                    
+                    const positions = this.pointCloud.geometry.attributes.position.array;
+                    positions[i * 3] = particle.position.x;
+                    positions[i * 3 + 1] = particle.position.y;
+                    positions[i * 3 + 2] = particle.position.z;
+                });
+                
+                this.pointCloud.geometry.attributes.position.needsUpdate = true;
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // Start the application
+        new VRSaltApp();
+    </script>
+</body>
+</html>
