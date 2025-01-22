@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@700&display=swap');
         body { margin: 0; }
         canvas { display: block; }
         #enter-vr {
@@ -139,6 +140,11 @@
                 // Position camera and add controllers
                 this.camera.position.z = 2;
                 
+                // Create a group to hold the particles and position it at eye level
+                this.particleGroup = new THREE.Group();
+                this.particleGroup.position.set(0, 1.6, -1); // Position at average eye height (1.6m) and 1m in front
+                this.scene.add(this.particleGroup);
+                
                 this.controller1 = this.renderer.xr.getController(0);
                 this.scene.add(this.controller1);
                 
@@ -157,7 +163,7 @@
                 canvas.height = 256;
                 
                 ctx.fillStyle = 'white';
-                ctx.font = '120px "Bebas Neue"';
+                ctx.font = 'bold 120px "DM Sans"';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText('SALT', canvas.width / 2, canvas.height / 2);
